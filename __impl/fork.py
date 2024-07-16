@@ -18,14 +18,14 @@ if TYPE_CHECKING:
 
 Hint_T = TypeVar("Hint_T")
 Score_T = TypeVar("Score_T", bound="SupportsRichComparison")
-Model_T = TypeVar("Model_T", bound="Model[Any]")
+Model_T = TypeVar("Model_T", bound="Model[Any, Any]")
 Env_T = TypeVar("Env_T", bound="Environment")
 
 CodeLine = Callable[[Model_T, Optional[Hint_T], Env_T], list[Hint_T]]
 
 
-class Model(Generic[Score_T], ABC): # Model trait
-    """Model trait, inherit from thsi class and implement the `score` method.
+class Model(Generic[Score_T, Env_T], ABC): # Model trait
+    """Model trait, inherit from this class and implement the `score` method.
     This will allow you to use this as a Model in the program, """
     __slots__ = ()
 
@@ -35,7 +35,15 @@ class Model(Generic[Score_T], ABC): # Model trait
 
 
 class Environment(ABC): # Enviroment trait
-    """Environment trait, inherit from this class and implement the `update` method. This will allow you """
+    """This environment represents shared state between all models. It could store data
+    about the structure of the model, or lookups. The state can be mutated after all
+    models (and their descendents) have run one time-step.
+
+    The only requirement for a type to inherit Environment is that it implements the
+    `update` method, to update the internal state each round. The `Environment`
+    implementor must include it's own synchronisation (such as a counter) to ensure
+    that updates happen at the correct time  
+    """
     __slots__ = ()
 
     @abstractmethod
@@ -45,7 +53,7 @@ class Environment(ABC): # Enviroment trait
 
 @final
 class Process(Generic[Model_T, Hint_T, Env_T]):
-    __slots__ = "__resume_ptr", "__hint", "__model"
+    __slots__ = ["__resume_ptr", "__hint", "__model"]
 
     def __init__(self, _model: Model_T, _hint: Optional[Hint_T] = None):
         self.__resume_ptr = 0
@@ -77,7 +85,7 @@ class Process(Generic[Model_T, Hint_T, Env_T]):
 
 @final
 class Sys(Generic[Model_T, Hint_T, Env_T]):
-    __slots__ = "__process_list", "__code", "__capacity"
+    __slots__ = ["__process_list", "__code", "__capacity"]
 
     def __init__(
         self,
@@ -117,7 +125,7 @@ class Sys(Generic[Model_T, Hint_T, Env_T]):
 
 @final
 class OperatingSystem(Generic[Model_T, Hint_T, Env_T]):
-    __slots__ = "__sys", "__env"
+    __slots__ = ["__sys", "__env"]
 
     def __init__(
         self,
@@ -134,100 +142,3 @@ class OperatingSystem(Generic[Model_T, Hint_T, Env_T]):
 
     def prune(self, stride: int, final_count: int):
         self.__sys.prune(stride, final_count)
-
-
-# ========== BEGIN USER CODE =========== #
-
-if __name__ == "__main__":
-
-    import random
-
-    class MainEnvironment(Environment):
-        __slots__ = "__clock"
-
-        def __init__(self):
-            self.__clock = 0
-
-        def get_clock(self) -> int:
-            return self.__clock
-
-        def update(self):
-            self.__clock = self.__clock + 1
-
-    ModelHint = int
-
-    class UniqueName:
-        def __init__(self):
-            self.value = random.randint(1_000, 9_999)
-
-        def __deepcopy__(self, _) -> UniqueName:
-            return UniqueName()
-
-        def __repr__(self) -> str:
-            return f"{self.value}"
-
-    class MainModel(Model[ModelHint]):
-        __slots__ = "unique_name", "value"
-
-        def __init__(self):
-            self.unique_name = UniqueName()
-            self.value = 0
-
-        def step_one_incr(self, hint: Optional[ModelHint], env: MainEnvironment) -> list[ModelHint]:
-            """This step increments the internal value using the given hint"""
-
-            if hint != None:
-                self.value += hint
-
-            return []
-
-        def step_two_test(self, hint: Optional[ModelHint], env: MainEnvironment) -> list[ModelHint]:
-            """This step intentionally ignores (and replaces) the input hint"""
-
-            if self.value % 2 == 0:
-                return [1, 2]
-            else:
-                return [3]
-
-        def step_thr_incr(
-            self, value: Optional[ModelHint], env: MainEnvironment
-        ) -> list[ModelHint]:
-            """as step one this increments the value, but here returns a different output"""
-
-            if value != None:
-                self.value += value
-            return [1, 2]
-
-        def step_fou_prin(
-            self, value: Optional[ModelHint], env: MainEnvironment
-        ) -> list[ModelHint]:
-            """this prints the model details to the terminal"""
-            print(f"{env.get_clock()}, {self.unique_name}, {self.score()}")
-
-            # pass the value through to the next stage
-            if value != None:
-                return []# value]
-            else:
-                return []
-
-        def score(self):
-            return self.value
-
-    def main():
-        os = OperatingSystem(
-            MainModel(),
-            [
-                MainModel.step_one_incr,
-                MainModel.step_two_test,
-                MainModel.step_thr_incr,
-                MainModel.step_fou_prin,
-            ],
-            MainEnvironment(),
-        )
-
-        while True:
-            print("loop")
-            os.execute()
-            os.prune(stride=10, final_count=50)
-
-    main()
